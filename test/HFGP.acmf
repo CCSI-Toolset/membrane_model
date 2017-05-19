@@ -1,0 +1,800 @@
+Version "25.0-0";
+Libraries "Modeler.acml", "SystemLibrary.acml";
+Parameter IPselector Uses StringParameter
+Valid as StringSet (["Initial","Rigorous"]);
+Value: "Rigorous";
+End
+Model HFGPnoS
+
+/* Hollow Fiber Gas Permeation Membrane Model, v2013.10.0 No Sweep
+
+Juan Morinelly (2013)
+
+The syntax below describes a rigorous model for a counter-current hollow fiber asymmetric membrane gas permeation module under
+the following assumptions:
+• The feed gas enters the shell side of the hollow fiber membrane and permeates to the fiber's bore. The permeate gas outlet is
+  at the same end as the feed. The gases in the retentate (shell) and permeate (fiber bore) sides flow from one discretized node
+  to the next in the direction of flow accumulating to form the retentate and permeate outlet streams (Counter-current flow).
+• The fibers that make up the bundle are identical, perfectly straight, and uniform diameter, cylindrical hollow tubes. The
+  feed gas mixture it is evenly distributed throughout a cross section of the fiber bundle. This is also the start point of the
+  discretized length domain of integration. The end point is at the retentate outlet stream. Radial concentration and flow
+  gradients in the fiber bundle are neglected (Problem is reduced to one dimension).
+• Under the expected operation conditions, the gas mixtures in the module are assumed to behave ideally. The driving force for
+  gas permeation is the difference of component partial pressure across the dense skin.
+• The dense skin layer of the asymmetrical hollow fiber membrane faces the shell side. The molar composition at the boundary of
+  the dense skin layer and the porous support is equal to the bulk molar composition at the fiber bore. This assumption implies
+  that there is no flux resistance imposed by the porous support.
+• Pressure in the shell is constant. The pressure in fiber bore varies due to constrained flow and can be described by the
+  Hagen-Poiseuille equation for a compressible fluid.
+• Isothermal conditions (No energy balance required).
+• Constant permeances: Q.CO2 = 1000 GPU = 0.12047 kmol/hr*m2*bar. Selectivity with respect to CO2: H2O = 0.5, N2 = 50,
+  O2 = 50.
+
+References
+• T.C. Merkel, H. Lin, X. Wei, R. Baker, Power Plant Post-Combustion Carbon Dioxide Capture: An Opportunity for Membranes,
+  Journal of Membrane Science 359 (2010) 123-139
+
+Modified by Juan Morinelly, September 2012: Initialization procedure variables and equations inclusion
+
+This Material was produced under the DOE Carbon Capture Simulation Initiative (CCSI), and copyright is held by the software owners: ORISE, LANS,
+LLNS, LBL, PNNL, CMU, WVU, et al. The software owners and/or the U.S. Government retain ownership of all rights in the CCSI software and the
+copyright and patents subsisting therein. Any distribution or dissemination is governed under the terms and conditions of the CCSI Test and
+Evaluation License, CCSI Master Non-Disclosiure Agreement, and the CCSI Intellectual Property Management Plan. No rights are granted except as
+expressly recited in one of the aforementioned agreements.
+
+*/
+//===============================================================================================================================================================
+
+//Global Parameters
+  R                     as RealParameter  (Description:"Universal gas constant ((bar*m3)/(kmol*K))", 8.314472e-2);
+  pi                    as RealParameter  (3.14159);
+ 
+//Membrane Parameters
+  Dfi                   as Length         (Description:"Inner fiber diameter (m)", 0.0004, Fixed);
+  Dfo                   as Length         (Description:"Outter fiber diameter (m)", 0.0006, Fixed);
+  L                     as Length         (Description:"Effective fiver length (m)", 1.0, Fixed);
+  nf                    as Notype         (Description:"Number of fibers in the module");
+  A                     as Notype         (Description:"Total membrane area required (m2)", 1.0e6);
+  theta                 as Fraction       (Description:"Overall stage cut, permeate to feed ratio");
+  Qcd                   as Notype         (Description:"Permeance of carbon dioxide across the membrane (kmol/(m2*hr*bar))", 0.12047, Fixed);
+  alpha(ComponentList)  as Notype         (Description:"Membrane selectivity of gas with respect to carbon dioxide (Qcd/Qgas)", Fixed);
+  dPper                 as Press_Drop     (Description:"Pressure drop in the permeate side due to capillary flow in the permeate side (bar)");
+  CCfct                 as Fraction       (Description:"Percentage of carbon dioxide in the feed (mol basis) that permeates", Fixed);
+  Rhoret                as Dens_Mol       (Description:"Retentate outlet stream molar density (kmol/m3)");
+  Rhoper                as Dens_Mol       (Description:"Permeate outlet stream molar density (kmol/m3)");
+
+//Initialization Procedure Parameters
+  IPselectA             as IPselector     (Description:"Permeate side flow IP selector");
+  IPselectB             as IPselector     (DEscription:"Permeate side pressure drop IP selector");
+
+//Component Properties
+  m                     as RealParameter  (1/Size(ComponentList));
+
+//Domain of Integration
+  k                     as RealParameter  (Description:"Number of integration steps", 20);
+  Axial                 as LengthDomain   (Length: L, DiscretizationMethod: "CFD2", NumSections: 1, SpacingPreference: L/k, Description: "Axis of fiber bundle");
+
+//Ports
+  Feed                  as Input          MoleFractionPort;
+  Retentate             as Output         MoleFractionPort;
+  Permeate              as Output         MoleFractionPort;
+
+//Distributed Variables
+  Fret                  as Distribution1D (XDomain is Axial, Description:"Feed side molar flow rate (kmol/hr)", 0.9*Feed.F)               of Flow_Mol;
+  Fper                  as Distribution1D (XDomain is Axial, Description:"Permeate side molar flow rate (kmol/hr)", 0.1*Feed.F)           of Flow_Mol;      
+  Zret(ComponentList)   as Distribution1D (XDomain is Axial, Description:"Shell side molar composition", m)                               of Molefraction;
+  Zflu(ComponentList)   as Distribution1D (XDomain is Axial, Description:"J/Jt", m)                                                       of Notype;
+  Zper(ComponentList)   as Distribution1D (XDomain is Axial, Description:"Fiber bore side molar composition", m)                          of Molefraction;
+  J(ComponentList)      as Distribution1D (XDomain is Axial, Description:"Species molar flow rate accross the membrane (kmol/(hr*m))")    of Notype;
+  Jt                    as Distribution1D (XDomain is Axial, Description:"Total molar flow rate accross the membrane (kmol/(hr*m))")      of Notype;
+  Pper                  as Distribution1D (XDomain is Axial, Description:"Pressure in fiber bore, permeate side (bar)")                   of Pressure;
+  Prat                  as Distribution1D (XDomain is Axial, Description:"Local fiber bore pressure to shell side pressure ratio")        of Notype;
+  nucP                  as Distribution1D (XDomain is Axial, Description:"Vapor viscosity (cP) (3.6e11 cP = 1 bar*hr)", 1.0e-2)           of Visc_Vap;
+  nu                    as Distribution1D (XDomain is Axial, Description:"Adjusted units viscosity (bar*hr)", 1.0e-14)                    of Notype;
+
+//===============================================================================================================================================================
+
+//Feed Inlet Boundary Conditions for Distributed Variables
+  Jt(0)         = Sigma(ForEach(comp in ComponentList)J(comp)(0));
+  Fret(0)       = Feed.F;
+  Fper(0)       = Feed.F - Fret(Axial.EndNode);
+  Prat(0)       = Pper(0)/Feed.P;
+  Call(nucP(0)) = pVisc_Vap(Feed.T,Pper(0),Zper(ComponentList)(0));
+  nu(0) = nucP(0)/3.6e11;
+  For comp in ComponentList Do
+    Zret(comp)(0) = Feed.z(comp);
+    If IPselectA == "Rigorous" Then
+      alpha(comp)*J(comp)(0) = pi*Dfo*nf*Qcd*Feed.P*(Zret(comp)(0) - Prat(0)*Zper(comp)(0));
+      Fper(0)*Zper(comp)(0).ddx = Jt(0)*Zper(comp)(0) - J(comp)(0);
+    Else
+      alpha(comp)*J(comp)(0) = pi*Dfo*nf*Qcd*Feed.P*(Zret(comp)(0) - Prat(0)*Zret(comp)(0));
+      Zper(comp)(0) = Zret(comp)(0);
+    EndIf
+    Zflu(comp)(0) = J(comp)(0)/Jt(0);
+  EndFor
+
+//Mass Trasport Equations for Distributed Variables in Domain of Integration
+  For x in [Axial.Interior + Axial.EndNode] Do
+    Jt(x)       = Sigma(ForEach(comp in ComponentList)J(comp)(x));
+    Fret(x).ddx = - Jt(x);
+    Fper(x).ddx = - Jt(x);
+    If IPselectB == "Rigorous" Then
+      Pper(x)*(Pper(x).ddx) = 128*R*(Feed.T + 273.15)*nu(x)*Fper(x)/(pi*(Dfi^4)*nf);//Hagen-Poiseuille equation for compressible fluid
+    Else
+      Pper(x).ddx = 0;
+    EndIf
+    Prat(x) = Pper(x)/Feed.P;
+    Call(nucP(x)) = pVisc_Vap(Feed.T,Pper(x),Zper(ComponentList)(x));
+    nu(x) = nucP(x)/3.6e11;
+    For comp in ComponentList Do
+      Fret(x)*Zret(comp)(x).ddx = Jt(x)*Zret(comp)(x) - J(comp)(x);      
+      If IPselectA == "Rigorous" Then
+        alpha(comp)*J(comp)(x) = pi*Dfo*nf*Qcd*Feed.P*(Zret(comp)(x) - Prat(x)*Zper(comp)(x));
+        Fper(x)*Zper(comp)(x).ddx = Jt(x)*Zper(comp)(x) - J(comp)(x);
+      Else
+        alpha(comp)*J(comp)(x) = pi*Dfo*nf*Qcd*Feed.P*(Zret(comp)(x) - Prat(x)*Zret(comp)(x));
+        Zper(comp)(x) = Zret(comp)(x);
+      EndIf
+      Zflu(comp)(x) = J(comp)(x)/Jt(x);
+    Endfor
+  Endfor
+
+//Module Performance Parameters
+  A = pi*Dfo*nf*L;
+  theta = (Feed.F - Retentate.F)/Feed.F;
+  dPper = Pper(Axial.EndNode) - Pper(0);
+  CCfct = (Feed.F*Feed.z("CO2") - Retentate.F*Retentate.z("CO2"))/(Feed.F*Feed.z("CO2"));
+
+//===============================================================================================================================================================
+
+//Retentate Outlet Stream Properties
+  Retentate.F = Fret(Axial.EndNode);
+  For comp in ComponentList Do
+    Retentate.z(comp) = Zret(comp)(Axial.EndNode);
+  EndFor
+  Retentate.T = Feed.T;
+  Retentate.P = Feed.P;
+  Call(Retentate.h) = pEnth_Mol_Vap(Retentate.T, Retentate.P, Retentate.z);
+  Call(Rhoret) = pDens_Mol_Vap(Retentate.T, Retentate.P, Retentate.z);
+  Retentate.V = 1/Rhoret;
+
+//Permeate Outlet Stream Properties
+  Permeate.F = Fper(0);
+  For comp in ComponentList Do
+    Permeate.z(comp) = ZPer(comp)(0);
+  EndFor
+  Permeate.T = Feed.T;
+  Permeate.P = Pper(0);
+  Call(Permeate.h) = pEnth_Mol_Vap(Permeate.T,  Permeate.P,  Permeate.z);
+  Call(Rhoper) = pDens_Mol_Vap(Permeate.T,  Permeate.P,  Permeate.z);
+  Permeate.V = 1/Rhoper;
+
+//SYSTEM SECTION - WARNING: DO NOT EDIT
+  Current_Icon : "System";
+TYPE M1_T0 ROLE "ICON" text
+Name = Module
+lines = 36
+
+sub main
+call Path.Begin
+call Path.Shift(-2.000000,0.750000)
+'' <<Path:0
+call Path.Box(0,0,4,-1.5,0,25600,5)
+call Path.Line(0,-1.5,4,0,0,5)
+'' >>
+call Path.End
+end sub
+
+sub LabPos
+call Label.at(-1.5,0.25)
+end sub
+
+sub ports
+call Port.name("UniversalIN")
+call Port.at(-1.99865,0.00110369)
+call Port.direction(0)
+call Port.name("UniversalOUT")
+call Port.at(1.9993,0.00110369)
+call Port.IOtype(1)
+call Port.direction(0)
+call Port.name("Feed")
+call Port.at(-1.99865,0.00110369)
+call Port.direction(0)
+call Port.name("Permeate")
+call Port.at(1.9993,0.00110369)
+call Port.IOtype(1)
+call Port.direction(0)
+call Port.name("Retentate")
+call Port.at(-0.0041032,0.750536)
+call Port.IOtype(1)
+call Port.direction(90)
+end sub
+
+
+
+endtext
+
+M1_T0_I0 as M1_T0;
+SystemData : Text
+<FORMLIST DEFAULTFORM="DeviceVariables">
+  <FORM NAME="DeviceVariables" CLSID="{6BA76840-806B-11D0-BE51-0000C09984EF}">
+    { Version : 1
+SizeX : 5250
+SizeY : 3750
+ShowAllVariables : False
+ShowAllAttributes : False
+ExpandAll : True
+ShowRegistryAttributes : True
+VariablesPaths : [ alpha(*) CCfct Dfi Dfo L Qcd ]
+AttributesPaths : [ Value Spec Units Description ]
+ColumnWidths : [ 2265 1215 1215 1200 1230 ]
+}
+  </FORM>
+</FORMLIST>
+EndText;
+TYPE IPsolve ROLE "SCRIPT" TEXT ' Solution script for the HFGPnoS with sequential initialization procedure.
+
+' The script solves the model in incremental steps of complexity by using
+' initialization procedure selectors (described below). The selectors are
+' switched from an 'Initial' state that selects a set of simplified model
+' equations to 'Rigorous' which selects a set of more accurate equations.
+
+' This script is meant to be used on an empty unit once enough variables
+' have been specified to satisfy the degrees of freedom.
+' For a more complete understanding, please refer to the HFGPnoS model syntax.
+
+' Juan Morinelly, September 2012
+
+' IPselector              Description
+' ---------------------------------------------
+' IPselectA               Permeate side mass flow
+' IPselectB               Permeate side pressure drop
+
+IPselectA.value = "Initial"
+IPselectB.value = "Initial"
+Simulation.Run(True)
+
+IPselectA.value = "Rigorous"
+Simulation.Run(True)
+
+IPselectB.value = "Rigorous"
+Simulation.Run(True)
+
+ENDTEXT
+
+//SYSTEM SECTION END
+End
+Model HFGPw_S
+
+/* Hollow Fiber Gas Permeation Membrane Model, v2013.10.0 With Sweep
+
+Juan Morinelly (2013)
+
+The syntax below describes a rigorous model for a counter-current hollow fiber asymmetric membrane gas permeation module under
+the following assumptions:
+• The feed gas enters the shell side of the hollow fiber membrane and permeates to the fiber's bore. The sweep gas (for M2 only)
+  enters the fiber bore side at the opposite end from the feed. The gases in the retentate (shell) and permeate (fiber bore)
+  sides flow from one discretized node to the next in the direction of flow accumulating to form the retentate and permeate
+  outlet streams (Counter-current flow).
+• The fibers that make up the bundle are identical, perfectly straight, and uniform diameter, cylindrical hollow tubes. The
+  feed gas mixture it is evenly distributed throughout a cross section of the fiber bundle. This is also the start point of the
+  discretized length domain of integration. The end point is at the retentate outlet stream. Radial concentration and flow
+  gradients in the fiber bundle are neglected (Problem is reduced to one dimension).
+• Under the expected operation conditions, the gas mixtures in the module are assumed to behave ideally. The driving force for
+  gas permeation is the difference of component partial pressure across the dense skin.
+• The dense skin layer of the asymmetrical hollow fiber membrane faces the shell side. The molar composition at the boundary of
+  the dense skin layer and the porous support is equal to the bulk molar composition at the fiber bore. This assumption implies
+  that there is no flux resistance imposed by the porous support.
+• Pressure in the shell is constant. The pressure in fiber bore varies due to constrained flow and can be described by the
+  Hagen-Poiseuille equation for a compressible fluid.
+• Isothermal conditions (No energy balance required).
+• Constant permeances: Q.CO2 = 1000 GPU = 0.12047 kmol/hr*m2*bar. Selectivity with respect to CO2: H2O = 0.5, N2 = 50,
+  O2 = 50.
+• Oxigen depletion (ODfct) is defined for a system where there is one mol of air sweep available for every mol of feed. See
+  the README document attached for the details of the equation development.
+
+References
+• T.C. Merkel, H. Lin, X. Wei, R. Baker, Power Plant Post-Combustion Carbon Dioxide Capture: An Opportunity for Membranes,
+  Journal of Membrane Science 359 (2010) 123-139
+
+Modified by Juan Morinelly, September 2012: Initialization procedure variables and equations inclusion
+
+This Material was produced under the DOE Carbon Capture Simulation Initiative (CCSI), and copyright is held by the software owners: ORISE, LANS,
+LLNS, LBL, PNNL, CMU, WVU, et al. The software owners and/or the U.S. Government retain ownership of all rights in the CCSI software and the
+copyright and patents subsisting therein. Any distribution or dissemination is governed under the terms and conditions of the CCSI Test and
+Evaluation License, CCSI Master Non-Disclosiure Agreement, and the CCSI Intellectual Property Management Plan. No rights are granted except as
+expressly recited in one of the aforementioned agreements.
+
+*/
+//===============================================================================================================================================================
+
+//Global Parameters
+  R                     as RealParameter  (Description:"Universal gas constant ((bar*m3)/(kmol*K))", 8.314472e-2);
+  pi                    as RealParameter  (3.14159);
+ 
+//Membrane Parameters
+  Dfi                   as Length         (Description:"Inner fiber diameter (m)", 0.0004, Fixed);
+  Dfo                   as Length         (Description:"Outter fiber diameter (m)", 0.0006, Fixed);
+  L                     as Length         (Description:"Effective fiver length (m)", 1.0, Fixed);
+  nf                    as Notype         (Description:"Number of fibers in the module");
+  A                     as Notype         (Description:"Total membrane area required (m2)", 1.0e6);
+  theta                 as Fraction       (Description:"Overall stage cut, permeate to feed ratio");
+  Qcd                   as Notype         (Description:"Permeance of carbon dioxide across the membrane (kmol/(m2*hr*bar))", 0.12047, Fixed);
+  alpha(ComponentList)  as Notype         (Description:"Membrane selectivity of gas with respect to carbon dioxide (Qcd/Qgas)", Fixed);
+  dPper                 as Press_Drop     (Description:"Pressure drop in the permeate side due to capillary flow in the permeate side (bar)");
+  CCfct                 as Fraction       (Description:"Percentage of carbon dioxide in the feed (mol basis) that permeates", Fixed);
+  ODfct                 as Notype         (Description:"Percentage of oxygen depleted from the sweep (mol basis) due to reverse permeation");
+  Rhoret                as Dens_Mol       (Description:"Retentate outlet stream molar density (kmol/m3)");
+  Rhoper                as Dens_Mol       (Description:"Permeate outlet stream molar density (kmol/m3)");
+
+//Initialization Procedure Parameters
+  IPselectA             as IPselector     (Description:"Permeate side flow IP selector");
+  IPselectB             as IPselector     (DEscription:"Permeate side pressure drop IP selector");
+
+//Component Properties
+  m                     as RealParameter  (1/Size(ComponentList));
+
+//Domain of Integration
+  k                     as RealParameter  (Description:"Number of integration steps", 20);
+  Axial                 as LengthDomain   (Length: L, DiscretizationMethod: "CFD2", NumSections: 1, SpacingPreference: L/k, Description: "Axis of fiber bundle");
+
+//Ports
+  Feed                  as Input          MoleFractionPort;
+  Sweep                 as Input          MoleFractionPort;
+  Retentate             as Output         MoleFractionPort;
+  Permeate              as Output         MoleFractionPort;
+
+//Distributed Variables
+  Fret                  as Distribution1D (XDomain is Axial, Description:"Feed side molar flow rate (kmol/hr)", 0.9*Feed.F)               of Flow_Mol;
+  Fper                  as Distribution1D (XDomain is Axial, Description:"Permeate side molar flow rate (kmol/hr)", 0.1*Feed.F)           of Flow_Mol;      
+  Zret(ComponentList)   as Distribution1D (XDomain is Axial, Description:"Shell side molar composition", m)                               of Molefraction;
+  Zflu(ComponentList)   as Distribution1D (XDomain is Axial, Description:"J/Jt", m)                                                       of Notype;
+  Zper(ComponentList)   as Distribution1D (XDomain is Axial, Description:"Fiber bore side molar composition", m)                          of Molefraction;
+  J(ComponentList)      as Distribution1D (XDomain is Axial, Description:"Species molar flow rate accross the membrane (kmol/(hr*m))")    of Notype;
+  Jt                    as Distribution1D (XDomain is Axial, Description:"Total molar flow rate accross the membrane (kmol/(hr*m))")      of Notype;
+  Pper                  as Distribution1D (XDomain is Axial, Description:"Pressure in fiber bore, permeate side (bar)")                   of Pressure;
+  Prat                  as Distribution1D (XDomain is Axial, Description:"Local fiber bore pressure to shell side pressure ratio")        of Notype;
+  nucP                  as Distribution1D (XDomain is Axial, Description:"Vapor viscosity (cP) (3.6e11 cP = 1 bar*hr)", 1.0e-2)           of Visc_Vap;
+  nu                    as Distribution1D (XDomain is Axial, Description:"Adjusted units viscosity (bar*hr)", 1.0e-14)                    of Notype;
+
+//===============================================================================================================================================================
+  
+//Feed Inlet Boundary Conditions for Distributed Variables
+  Jt(0)         = Sigma(ForEach(comp in ComponentList)J(comp)(0));
+  Fret(0)       = Feed.F;
+  Fper(0).ddx   = - Jt(0);
+  Prat(0)       = Pper(0)/Feed.P;
+  Call(nucP(0)) = pVisc_Vap(Feed.T,Pper(0),Zper(ComponentList)(0));
+  nu(0) = nucP(0)/3.6e11;
+  If IPselectB == "Rigorous" Then
+    Pper(0)*(Pper(0).ddx) = 128*R*(Feed.T + 273.15)*nu(0)*Fper(0)/(pi*(Dfi^4)*nf);//Hagen-Poiseuille equation for compressible fluid
+  Else
+    Pper(0).ddx = 0;
+  EndIf
+  For comp in ComponentList Do
+    Zret(comp)(0) = Feed.z(comp);
+    If IPselectA == "Rigorous" Then
+      alpha(comp)*J(comp)(0) = pi*Dfo*nf*Qcd*Feed.P*(Zret(comp)(0) - Prat(0)*Zper(comp)(0));
+      Fper(0)*Zper(comp)(0).ddx = Jt(0)*Zper(comp)(0) - J(comp)(0);
+    Else
+      alpha(comp)*J(comp)(0) = pi*Dfo*nf*Qcd*Feed.P*(Zret(comp)(0) - Prat(0)*Zret(comp)(0));
+      Zper(comp)(0) = Zret(comp)(0);
+    EndIf
+    Zflu(comp)(0) = J(comp)(0)/Jt(0);
+  EndFor
+
+//Sweep Inlet Boundary Conditions for Distributed Variables
+  Jt(Axial.EndNode)         = Sigma(ForEach(comp in ComponentList)J(comp)(Axial.Endnode));
+  Fret(Axial.EndNode).ddx   = - Jt(Axial.EndNode);
+  Fper(Axial.EndNode)       = Sweep.F;
+  Prat(Axial.EndNode)       = Pper(Axial.EndNode)/Feed.P;
+  Call(nucP(Axial.EndNode)) = pVisc_Vap(Feed.T,Pper(Axial.EndNode),Zper(ComponentList)(Axial.EndNode));
+  nu(Axial.EndNode)         = nucP(Axial.EndNode)/3.6e11;
+  Pper(Axial.EndNode)       = Sweep.P;
+  For comp in ComponentList Do
+    Fret(Axial.EndNode)*Zret(comp)(Axial.EndNode).ddx = Jt(Axial.EndNode)*Zret(comp)(Axial.EndNode) - J(comp)(Axial.EndNode);
+    If IPselectA == "Rigorous" Then
+      alpha(comp)*J(comp)(Axial.EndNode) = pi*Dfo*nf*Qcd*Feed.P*(Zret(comp)(Axial.EndNode) - Prat(Axial.EndNode)*Zper(comp)(Axial.EndNode));
+    Else
+      alpha(comp)*J(comp)(Axial.EndNode) = pi*Dfo*nf*Qcd*Feed.P*(Zret(comp)(Axial.EndNode) - Prat(Axial.EndNode)*Zret(comp)(Axial.EndNode));
+    EndIf
+    Zflu(comp)(Axial.EndNode) = J(comp)(Axial.EndNode)/Jt(Axial.EndNode);
+    Zper(comp)(Axial.EndNode) = Sweep.z(comp);
+  EndFor
+
+//Mass Trasport Equations for Distributed Variables in Domain of Integration
+  For x in [Axial.Interior] Do
+    Jt(x)       = Sigma(ForEach(comp in ComponentList)J(comp)(x));
+    Fret(x).ddx = - Jt(x);
+    Fper(x).ddx = - Jt(x);
+    If IPselectB == "Rigorous" Then
+      Pper(x)*(Pper(x).ddx) = 128*R*(Feed.T + 273.15)*nu(x)*Fper(x)/(pi*(Dfi^4)*nf);//Hagen-Poiseuille equation for compressible fluid
+    Else
+      Pper(x) = 1.01325;
+    EndIf
+    Prat(x)     = Pper(x)/Feed.P;
+    Call(nucP(x)) = pVisc_Vap(Feed.T,Pper(x),Zper(ComponentList)(x));
+    nu(x) = nucP(x)/3.6e11;
+    For comp in ComponentList Do
+      Fret(x)*Zret(comp)(x).ddx = Jt(x)*Zret(comp)(x) - J(comp)(x);      
+      If IPselectA == "Rigorous" Then
+        alpha(comp)*J(comp)(x) = pi*Dfo*nf*Qcd*Feed.P*(Zret(comp)(x) - Prat(x)*Zper(comp)(x));
+        Fper(x)*Zper(comp)(x).ddx = Jt(x)*Zper(comp)(x) - J(comp)(x);
+      Else
+        alpha(comp)*J(comp)(x) = pi*Dfo*nf*Qcd*Feed.P*(Zret(comp)(x) - Prat(x)*Zret(comp)(x));
+        Zper(comp)(x) = Zret(comp)(x);
+      EndIf
+      Zflu(comp)(x) = J(comp)(x)/Jt(x);
+    Endfor
+  Endfor
+
+//Module Performance Parameters
+  A = pi*Dfo*nf*L;
+  theta = (Feed.F - Retentate.F)/Feed.F;
+  dPper = Pper(Axial.EndNode) - Pper(0);
+  CCfct = (Feed.F*Feed.z("CO2") - Retentate.F*Retentate.z("CO2"))/(Feed.F*Feed.z("CO2"));
+  ODfct = (Sweep.F*Sweep.z("O2") - Permeate.F*Permeate.z("O2"))/(Sweep.F*Sweep.z("O2"));
+
+//===============================================================================================================================================================
+
+//Retentate Outlet Stream Properties
+  Retentate.F = Fret(Axial.EndNode);
+  For comp in ComponentList Do
+    Retentate.z(comp) = Zret(comp)(Axial.EndNode);
+  EndFor
+  Retentate.T = Feed.T;
+  Retentate.P = Feed.P;
+  Call(Retentate.h) = pEnth_Mol_Vap(Retentate.T, Retentate.P, Retentate.z);
+  Call(Rhoret) = pDens_Mol_Vap(Retentate.T, Retentate.P, Retentate.z);
+  Retentate.v = 1/Rhoret;
+
+//Permeate Outlet Stream Properties
+  Permeate.F = Fper(0);
+  For comp in ComponentList Do
+    Permeate.z(comp) = ZPer(comp)(0);
+  EndFor
+  Permeate.T = Feed.T;
+  Permeate.P = Pper(0);
+  Call(Permeate.h) = pEnth_Mol_Vap(Permeate.T,  Permeate.P,  Permeate.z);
+  Call(Rhoper) = pDens_Mol_Vap(Permeate.T,  Permeate.P,  Permeate.z);
+  Permeate.v = 1/Rhoper;
+
+//SYSTEM SECTION - WARNING: DO NOT EDIT
+  Current_Icon : "System";
+TYPE M2_T0 ROLE "ICON" text
+Name = Module
+lines = 39
+
+sub main
+call Path.Begin
+call Path.Shift(-2.000000,0.750000)
+'' <<Path:0
+call Path.Box(0,0,4,-1.5,0,25600,5)
+call Path.Line(0,-1.5,4,0,0,5)
+'' >>
+call Path.End
+end sub
+
+sub LabPos
+call Label.at(-1.5,0.25)
+end sub
+
+sub ports
+call Port.name("Feed")
+call Port.at(-2.00027,-0.000814975)
+call Port.direction(0)
+call Port.name("Sweep")
+call Port.at(-0.00211499,-0.749594)
+call Port.direction(90)
+call Port.name("Permeate")
+call Port.at(1.99991,-0.000814975)
+call Port.IOtype(1)
+call Port.direction(0)
+call Port.name("Retentate")
+call Port.at(-0.00211499,0.75132)
+call Port.IOtype(1)
+call Port.direction(90)
+call Port.name("UniversalIN")
+call Port.at(-2.00027,-0.000814975)
+call Port.direction(0)
+call Port.name("UniversalOUT")
+call Port.at(1.99991,-0.000814975)
+call Port.IOtype(1)
+call Port.direction(0)
+end sub
+
+
+
+endtext
+
+M2_T0_I0 as M2_T0;
+SystemData : Text
+<FORMLIST DEFAULTFORM="DeviceVariables">
+  <FORM NAME="DeviceVariables" CLSID="{6BA76840-806B-11D0-BE51-0000C09984EF}">
+    { Version : 1
+SizeX : 5250
+SizeY : 3750
+ShowAllVariables : False
+ShowAllAttributes : False
+ExpandAll : True
+ShowRegistryAttributes : True
+VariablesPaths : [ alpha(*) CCfct Dfi Dfo L Qcd ]
+AttributesPaths : [ Value Spec Units Description ]
+ColumnWidths : [ 2265 1215 1215 1200 1230 ]
+}
+  </FORM>
+</FORMLIST>
+EndText;
+TYPE IPsolve ROLE "SCRIPT" TEXT ' Solution script for the HFGPw_S with sequential initialization procedure.
+
+' The script solves the model in incremental steps of complexity by using
+' initialization procedure selectors (described below). The selectors are
+' switched from an 'Initial' state that selects a set of simplified model
+' equations to 'Rigorous' which selects a set of more accurate equations.
+
+' This script is meant to be used on an empty unit once enough variables
+' have been specified to satisfy the degrees of freedom.
+' For a more complete understanding, please refer to the HFGPnoS model syntax.
+
+' Juan Morinelly, September 2012
+
+' IPselector              Description
+' ---------------------------------------------
+' IPselectA               Permeate side mass flow
+' IPselectB               Permeate side pressure drop
+
+IPselectA.value = "Initial"
+IPselectB.value = "Initial"
+Simulation.Run(True)
+
+IPselectA.value = "Rigorous"
+Simulation.Run(True)
+
+IPselectB.value = "Rigorous"
+Simulation.Run(True)
+
+ENDTEXT
+
+//SYSTEM SECTION END
+End
+SystemData : Text
+globaldatasection
+EndText;
+SystemData : Text
+<FORMLIST DEFAULTFORM="AllGlobals">
+  <FORM NAME="AllGlobals" CLSID="{6BA76840-806B-11D0-BE51-0000C09984EF}">
+    { Version : 1
+SizeX : 5250
+SizeY : 3750
+ShowAllVariables : True
+ShowAllAttributes : False
+ExpandAll : True
+ShowRegistryAttributes : True
+VariablesPaths : [ ]
+AttributesPaths : [ Value Spec Units Description ]
+ColumnWidths : [ 2265 1215 1215 1200 2925 ]
+}
+  </FORM>
+</FORMLIST>
+EndText;
+
+FLOWSHEET
+
+CONSTRAINTS
+  // Flowsheet variables and equations...
+END
+
+//SYSTEM SECTION - WARNING: DO NOT EDIT
+SystemData : Text
+<FORMLIST DEFAULTFORM="AllVariables">
+</FORMLIST>
+EndText;
+
+//SYSTEM SECTION END
+  ActiveTasks : [];
+  Graphics : TEXT CLSID {A0DFFFE6-908E-11CE-A964-0000C08C668E}
+# of PFS Objects = 1
+SIZE -3 3 -3 3
+LEGEND
+Version: 2
+Dim: -3.78265 -3.2 -2.93291 -3.37448
+Size: 0.0120696
+Font: 1 0 =Times New Roman
+# of PFS Objects = 0
+VIEWPORT -6.252041 6.252039 3.300000 -3.712423
+LAYOUT
+TableFormat 1
+Pages 1 1 1 1
+PAGESETUP
+PAPERSIZE 
+PAPERSOURCE 
+ORIENTATION -1
+PRINTPAGENO 1 1
+LEFTMARGIN 0.5"
+RIGHTMARGIN 0.5"
+TOPMARGIN 0.5"
+BOTTOMMARGIN 0.5"
+VISIBILITY 0.030000
+PFDFLAG 255 255
+PFDMODE 0
+SCALE 0.012070
+
+ENDTEXT;
+END
+
+Properties
+Package : "None";
+End
+
+Options
+  AbsoluteSingularityTol: 1.e-004;
+  AbsPerturb: 1.e-005;
+  AbsTearTol: 1.e-005;
+  AbsTol: 1.e-005;
+  AssignmentWarningsEnabled: True;
+  ChangeTol: 1.e-005;
+  CheckProcDerivs: "Off";
+  Compression: True;
+  CurrentUOMSet: "Metric";
+  Decomposer.ProgID: "AspenTech.Decomposer";
+  Decomposition.MultipleGroup: True;
+  DerivAbsTol: 1.e-003;
+  DerivRelTol: 0.1;
+  EqnTol: 1.e-005;
+  EquationSensCheck: False;
+  EquationSensTol: 10000000000.;
+  EstimationPrintLevel: "Medium";
+  EstimationReturntoBestPoint: False;
+  EstimationSolver: 2;
+  Estimator: 1;
+  ExplicitEventTolerance: 1.e-005;
+  Feasopt.MaxAbsStep: 10.;
+  Feasopt.MaxEval: 100;
+  Feasopt.MaxRelStep: 10.;
+  Feasopt.OptTol: 1.e-004;
+  Homotopy.InitialStep: 0.1;
+  Homotopy.MaximumStep: 1.;
+  Homotopy.MinimumStep: 1.e-002;
+  Homotopy.StepDecrement: 0.5;
+  Homotopy.StepIncrement: 10;
+  Integration.AbsErrorTol: 1.e-005;
+  Integration.AbsTearTol: 1.e-005;
+  Integration.DiscontinuityEventTol: 1.e-005;
+  Integration.EnforceMinStep: False;
+  Integration.IncSensErrors: False;
+  Integration.InitStepSize: 5.e-003;
+  Integration.ItplToComTime: True;
+  Integration.LocateIEvents: False;
+  Integration.MaxOrder: 5;
+  Integration.MaxStepSize: 1.;
+  Integration.MinStepSize: 1.e-003;
+  Integration.ProgID: "AspenTech.UnifiedIntegrator";
+  Integration.RcvTornVars: False;
+  Integration.ReInitAfterEE: False;
+  Integration.ReInitAfterIE: False;
+  Integration.RelErrorTol: 1.e-005;
+  Integration.RelTearTol: 1.e-005;
+  Integration.RewindToLastConvStep: False;
+  Integration.ShowHIErrors: 0;
+  Integration.ShowHTIErrors: 0;
+  Integration.StepRedFact: 0.5;
+  Integration.StepSize: 1.e-002;
+  Integration.StepSizeType: "Variable";
+  Integration.TestSAndAVars: False;
+  Integration.UsePrevAfterEE: False;
+  Integrator: "ImplicitEuler";
+  KeepCompiledEvaluationFiles: False;
+  LinearSolver: "MA48";
+  ListEquivalenceVariables: True;
+  LogLikelihood.MaxIter: 100;
+  LogLikelihood.SolTol: 1.e-004;
+  MA48.DropTol: 0.;
+  MA48.EnableRefineIter: True;
+  MA48.MaxRefineIter: 10;
+  MA48.PivotSearch: 3;
+  MA48.PivotTol: 1.e-050;
+  MA48.Repivot: 0;
+  MA48.UseTranspose: 0;
+  MaxTearIter: 100;
+  Nl2sol.AbsFuncTol: 1.e-020;
+  Nl2sol.FalseConvTol: 0.;
+  Nl2sol.MaxIter: 50;
+  Nl2sol.RelFuncTol: 1.e-004;
+  Nl2sol.SolTol: 1.e-004;
+  NLASolver: "Standard";
+  Nonlinear.AbsPert: 1.e-005;
+  Nonlinear.BestOnFail: True;
+  Nonlinear.BoundClip: 1.e-006;
+  Nonlinear.BoundFrac: 1.;
+  Nonlinear.ConvCrit: "Residual";
+  Nonlinear.CreepIter: 0;
+  Nonlinear.CreepSize: 0.1;
+  Nonlinear.Dogleg: False;
+  Nonlinear.HiResidual: 0;
+  Nonlinear.HiVarSteps: 0;
+  Nonlinear.MathsPrint: 0;
+  Nonlinear.MaxDivSteps: 10;
+  Nonlinear.MaxFastNewtonSteps: 5;
+  Nonlinear.MaxIter: 100;
+  Nonlinear.MaxStepRed: 10;
+  Nonlinear.MaxVarStep: 50.;
+  Nonlinear.Method: "Mixed Newton";
+  Nonlinear.RangeFrac: 0.;
+  Nonlinear.SingPert: 1.e-002;
+  OptimizationObjFun: "Minimize";
+  OptimizationPrintLevel: "Medium";
+  Optimizer: 1;
+  PrintLevel: 2;
+  PropInfo: -1;
+  RelativeSingularityCheck: True;
+  RelativeSingularityTol: 1.e-002;
+  RelPerturb: 1.e-005;
+  RelTearTol: 1.e-005;
+  RelTol: 1.e-005;
+  RunMode: "SteadyState";
+  SaveFreeVariableValues: True;
+  Scaling: False;
+  SensErrorCheck: True;
+  SnapshotSettings.EnableDynInitialization: True;
+  SnapshotSettings.EnableFileSaved: False;
+  SnapshotSettings.EnableInitialization: True;
+  SnapshotSettings.EnableInitialSpec: True;
+  SnapshotSettings.EnableMaximum: True;
+  SnapshotSettings.EnableonReinitialization: False;
+  SnapshotSettings.EnableProblemEdit: True;
+  SnapshotSettings.EnableRegularSnapshot: False;
+  SnapshotSettings.EnableSteadyState: True;
+  SnapshotSettings.Interval: 2.;
+  SnapshotSettings.Maximum: 10;
+  SnapshotSettings.SaveConvergedOnly: True;
+  SnapshotSettings.TakeAutoSnapshots: True;
+  SyncSteps: "Full";
+  Tearing: "update";
+  TearUpdate: "Direct";
+  TimeSettings.CommunicationInterval: 1.e-002;
+  TimeSettings.CommunicationUnits: "Hours";
+  TimeSettings.DisplayUpdateInterval: 2000;
+  TimeSettings.EnablePauseAt: False;
+  TimeSettings.EnableStepFor: False;
+  TimeSettings.PauseAt: 0.;
+  TimeSettings.RealTimeSyncFactor: 0.;
+  TimeSettings.RecordHistory: False;
+  TimeSettings.StepFor: 0;
+  TimeSettings.TimeDisplayUnits: "Hours";
+  UseCompiledEvaluation: False;
+  UseSavedSnapshotOnLoad: False;
+  WatchGroup: 0;
+  WatchSubGroup: 0;
+  Wegstein.MaxAcceleration: 0.;
+  Wegstein.MinAcceleration: -5.;
+  OpenLASolver: "";
+  OpenNLASolver: "";
+  OpenOPTSolver: "";
+  OpenESTSolver: "";
+End
+Optimization
+  IsDynamic : FALSE;
+  ElementSizeBoundsAutomatic : TRUE;
+  EndTime : 1.000000000000000;
+  Control.FinalTime_Initial : 1.000000000000000;
+  Control.FinalTime_Upper : 2.000000000000000;
+  Control.FinalTime_Lower : 0.5000000000000000;
+  Control.FinalTime_IsFixed : TRUE;
+  Control.FinalTime_IsObjective : FALSE;
+  Control.Elements : 5;
+  Control.FixedInterval : TRUE;
+  Control.MovingElementsVarying : FALSE;
+  Control.PiecewiseLinear : FALSE;
+  Control(0) : 0.2000000000000000, 0.05000000000000000, 0.4000000000000000 ;
+  Control(1) : 0.2000000000000000, 0.05000000000000000, 0.4000000000000000 ;
+  Control(2) : 0.2000000000000000, 0.05000000000000000, 0.4000000000000000 ;
+  Control(3) : 0.2000000000000000, 0.05000000000000000, 0.4000000000000000 ;
+  Control(4) : 0.2000000000000000, 0.05000000000000000, 0.4000000000000000 ;
+End
+Estimation
+  CalcHeteroParams : TRUE;
+  ExperimentTimeUnit: "";
+End
+Homotopy
+ Enabled: FALSE;
+End
