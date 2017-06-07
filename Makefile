@@ -1,5 +1,5 @@
 # A simple makefile for creating the HFGP Membrane Model distribution
-VERSION    := 2015.06.00
+VERSION    := `git describe --tags`
 PRODUCT    := Hollow Fiber Gas Permeation Membrane Model
 PROD_SNAME := Membrane_model
 LICENSE    := CCSI_TE_LICENSE_$(PROD_SNAME).txt
