@@ -6,9 +6,10 @@ LICENSE    := LICENSE.md
 PKG_DIR    := CCSI_$(PROD_SNAME)_$(VERSION)
 PACKAGE    := $(PKG_DIR).zip
 
-PAYLOAD := README.md \
-	HFGP.acmf \
-	$(LICENSE)
+PAYLOAD := 	docs/*.pdf \
+			README.md \
+			HFGP.acmf \
+			$(LICENSE)
 
 # Get just the top part (not dirname) of each entry so cp -r does the right thing
 PAYLOAD_TOPS := $(sort $(foreach v,$(PAYLOAD),$(shell echo $v | cut -d'/' -f1)))

@@ -36,12 +36,7 @@ References
 
 Modified by Juan Morinelly, September 2012: Initialization procedure variables and equations inclusion
 
-This Material was produced under the DOE Carbon Capture Simulation Initiative (CCSI), and copyright is held by the software owners: ORISE, LANS,
-LLNS, LBL, PNNL, CMU, WVU, et al. The software owners and/or the U.S. Government retain ownership of all rights in the CCSI software and the
-copyright and patents subsisting therein. Any distribution or dissemination is governed under the terms and conditions of the CCSI Test and
-Evaluation License, CCSI Master Non-Disclosiure Agreement, and the CCSI Intellectual Property Management Plan. No rights are granted except as
-expressly recited in one of the aforementioned agreements.
-
+See LICENSE.md for license and copyright details
 
 ...Kayode Ajayi (2015)
 // Pressure drop model was included in the shell side of the membrane. It was based on Hagen-Posiellie equation  by introducing
@@ -371,8 +366,6 @@ References
 
 Modified by Juan Morinelly, September 2012: Initialization procedure variables and equations inclusion
 
-
-
 Modified by Kayode Ajayi (2015)
 // Pressure drop model was included in the shell side of the membrane. It was based on Hagen-Posiellie equation  by introducing
    hydraulic diameter (Daejun Chang, Joonho MIn, Sehern Oh, Kilo Moon, Effect of Pressure Drop on performance of Hollow membrane model for gas permeation,
@@ -380,11 +373,7 @@ Modified by Kayode Ajayi (2015)
   Li-Hua Cheng, Ping-Chung Wu, Junghui Chen, Modelling and optimisation of hollow fiber DCMD module for desalination, Journal of Membernae Science, 154 (2008),
   154-166
 
-This Material was produced under the DOE Carbon Capture Simulation Initiative (CCSI), and copyright is held by the software owners: ORISE, LANS,
-LLNS, LBL, PNNL, CMU, WVU, et al. The software owners and/or the U.S. Government retain ownership of all rights in the CCSI software and the
-copyright and patents subsisting therein. Any distribution or dissemination is governed under the terms and conditions of the CCSI Test and
-Evaluation License, CCSI Master Non-Disclosiure Agreement, and the CCSI Intellectual Property Management Plan. No rights are granted except as
-expressly recited in one of the aforementioned agreements.
+  See LICENSE.md for license and copyright details.
 
 */
 //===============================================================================================================================================================
