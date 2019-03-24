@@ -102,7 +102,7 @@ See LICENSE.md for license and copyright details
   nucP                  as Distribution1D (XDomain is Axial, Description:"Vapor viscosity (cP) (3.6e11 cP = 1 bar*hr)", 1.0e-2)           of Visc_Vap;
   nu                    as Distribution1D (XDomain is Axial, Description:"Adjusted units viscosity (bar*hr)", 1.0e-14)                    of Notype;
 
-  rhore                 as Distribution1D (XDomain is Axial, Description:"shell side(retenate) density(kmol/3)")                          of dens_mol_vap;
+  rhore                 as Distribution1D (XDomain is Axial, Description:"shell side(retenate) density(kmol/m3)")                          of dens_mol_vap;
   nuretcP               as Distribution1D (XDomain is Axial, Description:"Vapor viscosity (cP) (3.6e11 cP = 1 bar*hr)", 1.0e-2)           of Visc_Vap;
   nuret                 as Distribution1D (XDomain is Axial, Description:"Adjusted units viscosity (bar*hr)", 1.0e-14)                    of Notype;
   Vret                  as Distribution1D (XDomain is Axial, Description: "Shell side velocity(m/s)")                                     of velocity;
@@ -182,7 +182,7 @@ See LICENSE.md for license and copyright details
 
   For x in [Axial.Interior + Axial.EndNode] Do
    If IPselectC == "Rigorous" Then
-      Pret(x).ddx = -8*nuret(x)*Vret(x)/((d_e/2)^2);
+      Pret(x).ddx = -8*nuret(x)*3600*Vret(x)/((d_e/2)^2);
 
     Else
       Pret(x) = Feed.P;
@@ -435,7 +435,7 @@ Modified by Kayode Ajayi (2015)
   nu                    as Distribution1D (XDomain is Axial, Description:"Adjusted units viscosity (bar*hr)", 1.0e-14)                    of Notype;
 
 
-  rhore                 as Distribution1D (XDomain is Axial, Description:"shell side(retenate) density(kmol/3)")                          of dens_mol_vap;
+  rhore                 as Distribution1D (XDomain is Axial, Description:"shell side(retenate) density(kmol/m3)")                          of dens_mol_vap;
   nuretcP               as Distribution1D (XDomain is Axial, Description:"Vapor viscosity (cP) (3.6e11 cP = 1 bar*hr)", 1.0e-2)           of Visc_Vap;
   nuret                 as Distribution1D (XDomain is Axial, Description:"Adjusted units viscosity (bar*hr)", 1.0e-14)                    of Notype;
   Vret                  as Distribution1D (XDomain is Axial, Description: "Shell side velocity(m/s)")                                     of velocity;
@@ -543,7 +543,7 @@ Modified by Kayode Ajayi (2015)
   //Shell side Pressure drop calculation
   For x in [Axial.Interior + Axial.EndNode] Do
     If IPselectC == "Rigorous" Then
-     Pret(x).ddx = -8*nuret(x)*Vret(x)/((d_e/2)^2);
+     Pret(x).ddx = -8*nuret(x)*3600*Vret(x)/((d_e/2)^2);
 
     Else
       Pret(x) = Feed.P;
@@ -730,14 +730,14 @@ EndText;
   ActiveTasks : [];
   Graphics : TEXT CLSID {A0DFFFE6-908E-11CE-A964-0000C08C668E}
 # of PFS Objects = 1
-SIZE -3 3 -3 3
+SIZE -1.42239 -0.422388 0.559208 1.85921
 LEGEND
 Version: 2
-Dim: -3.78265 -3.2 -3.03493 -3.34808
-Size: 0.00929802
+Dim: -3.78265 -3.2 -2.84517 -3.38307
+Size: 0.00933389
 Font: 1 0 =Times New Roman
 # of PFS Objects = 0
-VIEWPORT -6.252041 8.262162 3.300000 -3.803684
+VIEWPORT -6.252041 8.262162 3.300000 -4.400462
 LAYOUT
 TableFormat 1
 Pages 1 1 1 1
@@ -753,7 +753,7 @@ BOTTOMMARGIN 0.5"
 VISIBILITY 0.030000
 PFDFLAG 255 255
 PFDMODE 0
-SCALE 0.009298
+SCALE 0.009334
 
 ENDTEXT;
 END
