@@ -102,7 +102,7 @@ See LICENSE.md for license and copyright details
   nucP                  as Distribution1D (XDomain is Axial, Description:"Vapor viscosity (cP) (3.6e11 cP = 1 bar*hr)", 1.0e-2)           of Visc_Vap;
   nu                    as Distribution1D (XDomain is Axial, Description:"Adjusted units viscosity (bar*hr)", 1.0e-14)                    of Notype;
 
-  rhore                 as Distribution1D (XDomain is Axial, Description:"shell side(retenate) density(kmol/3)")                          of dens_mol_vap;
+  rhore                 as Distribution1D (XDomain is Axial, Description:"shell side(retenate) density(kmol/m3)")                          of dens_mol_vap;
   nuretcP               as Distribution1D (XDomain is Axial, Description:"Vapor viscosity (cP) (3.6e11 cP = 1 bar*hr)", 1.0e-2)           of Visc_Vap;
   nuret                 as Distribution1D (XDomain is Axial, Description:"Adjusted units viscosity (bar*hr)", 1.0e-14)                    of Notype;
   Vret                  as Distribution1D (XDomain is Axial, Description: "Shell side velocity(m/s)")                                     of velocity;
@@ -175,14 +175,14 @@ See LICENSE.md for license and copyright details
  d_e = ((Ds^2) - (nf*(dfo^2)))/(ds + (nf*dfo));
 
 //Packing density of module used to calculate the inner diameter of shell
- phi = nf*((dfo/ds)^2);
+ ds = dfo*sqrt(nf/phi);
 
   // Cross sectional flow area for shell side
  SA = (pi/4)*(ds^2- nf*(dfo^2));
 
   For x in [Axial.Interior + Axial.EndNode] Do
    If IPselectC == "Rigorous" Then
-      Pret(x).ddx = -8*nuret(x)*Vret(x)/((d_e/2)^2);
+      Pret(x).ddx = -8*nuret(x)*3600*Vret(x)/((d_e/2)^2);
 
     Else
       Pret(x) = Feed.P;
@@ -435,7 +435,7 @@ Modified by Kayode Ajayi (2015)
   nu                    as Distribution1D (XDomain is Axial, Description:"Adjusted units viscosity (bar*hr)", 1.0e-14)                    of Notype;
 
 
-  rhore                 as Distribution1D (XDomain is Axial, Description:"shell side(retenate) density(kmol/3)")                          of dens_mol_vap;
+  rhore                 as Distribution1D (XDomain is Axial, Description:"shell side(retenate) density(kmol/m3)")                          of dens_mol_vap;
   nuretcP               as Distribution1D (XDomain is Axial, Description:"Vapor viscosity (cP) (3.6e11 cP = 1 bar*hr)", 1.0e-2)           of Visc_Vap;
   nuret                 as Distribution1D (XDomain is Axial, Description:"Adjusted units viscosity (bar*hr)", 1.0e-14)                    of Notype;
   Vret                  as Distribution1D (XDomain is Axial, Description: "Shell side velocity(m/s)")                                     of velocity;
@@ -534,7 +534,7 @@ Modified by Kayode Ajayi (2015)
   d_e = ((Ds^2) - (nf*(dfo^2)))/(ds + (nf*dfo));
 
 //Packing density of the module used to calculate inside diameter of shell
-  phi = nf*((dfo/ds)^2);
+  ds = dfo*sqrt(nf/phi);
 
  //Cross sectional flow area for shell side
  
@@ -543,7 +543,7 @@ Modified by Kayode Ajayi (2015)
   //Shell side Pressure drop calculation
   For x in [Axial.Interior + Axial.EndNode] Do
     If IPselectC == "Rigorous" Then
-     Pret(x).ddx = -8*nuret(x)*Vret(x)/((d_e/2)^2);
+     Pret(x).ddx = -8*nuret(x)*3600*Vret(x)/((d_e/2)^2);
 
     Else
       Pret(x) = Feed.P;
@@ -730,14 +730,14 @@ EndText;
   ActiveTasks : [];
   Graphics : TEXT CLSID {A0DFFFE6-908E-11CE-A964-0000C08C668E}
 # of PFS Objects = 1
-SIZE -3 3 -3 3
+SIZE -5.34665 -1.62243 -0.330884 1.68524
 LEGEND
 Version: 2
-Dim: -3.78265 -3.2 -3.03493 -3.34808
-Size: 0.00929802
+Dim: -3.78265 -3.2 -2.84936 -3.39176
+Size: 0.0110172
 Font: 1 0 =Times New Roman
 # of PFS Objects = 0
-VIEWPORT -6.252041 8.262162 3.300000 -3.803684
+VIEWPORT -7.366420 10.944214 2.491439 -7.391015
 LAYOUT
 TableFormat 1
 Pages 1 1 1 1
@@ -753,13 +753,20 @@ BOTTOMMARGIN 0.5"
 VISIBILITY 0.030000
 PFDFLAG 255 255
 PFDMODE 0
-SCALE 0.009298
+SCALE 0.011017
 
 ENDTEXT;
 END
 
 Properties
-Package : "None";
+Package : "Aprpdf";
+WorkingDirectory : "C:\Users\mzamarripa\Documents\Superstructure_project\Membrane_CO2capture\membr_proj\AM_MEMCAP\";
+RunID : "propsplus.aprpdf";
+
+Default as ComponentList; 
+Within Default
+  Components :["CO2","H2O","N2","O2"];
+EndWithin
 End
 
 Options
@@ -837,7 +844,7 @@ Options
   Nl2sol.MaxIter: 50;
   Nl2sol.RelFuncTol: 1.e-004;
   Nl2sol.SolTol: 1.e-004;
-  NLASolver: "Standard";
+  NLASolver: "DMO";
   Nonlinear.AbsPert: 1.e-005;
   Nonlinear.BestOnFail: True;
   Nonlinear.BoundClip: 1.e-006;
@@ -904,7 +911,69 @@ Options
   Wegstein.MaxAcceleration: 0.;
   Wegstein.MinAcceleration: -5.;
   OpenLASolver: "";
-  OpenNLASolver: "";
+  OpenNLASolver: "aos_dmo.dll";
+  OpenNLASolverParameters.ACTIVEINIT: 0;
+  OpenNLASolverParameters.ACTIVERPT: 0;
+  OpenNLASolverParameters.ACTIVESAVE: 0;
+  OpenNLASolverParameters.ACTIVESPACE: 2;
+  OpenNLASolverParameters.ADCVITER: 100;
+  OpenNLASolverParameters.ADCVMETH: 0;
+  OpenNLASolverParameters.ADCVOBJCVG: 1.e-006;
+  OpenNLASolverParameters.ADCVRESCVG: 1.e-006;
+  OpenNLASolverParameters.ANALYSISTHRES: 2.;
+  OpenNLASolverParameters.BOUNDRPT: 1;
+  OpenNLASolverParameters.BTF: 1;
+  OpenNLASolverParameters.CREEPFLAG: 0;
+  OpenNLASolverParameters.CREEPITER: 10;
+  OpenNLASolverParameters.CREEPSIZE: 0.1;
+  OpenNLASolverParameters.CWORKF: 1.;
+  OpenNLASolverParameters.DENSITYRATIO: 0.7;
+  OpenNLASolverParameters.DROPTOL: 1.e-020;
+  OpenNLASolverParameters.FACTORSPACE: 6;
+  OpenNLASolverParameters.FACTORSPEED: 1;
+  OpenNLASolverParameters.FREEONLY: 0;
+  OpenNLASolverParameters.HESSIANSCL: 1.;
+  OpenNLASolverParameters.HESSIANUPDATES: 10;
+  OpenNLASolverParameters.IPSIRPT: 1;
+  OpenNLASolverParameters.IWORKF: 1.;
+  OpenNLASolverParameters.LINESEARCH: 3;
+  OpenNLASolverParameters.LINESRCMODE: 0;
+  OpenNLASolverParameters.LSMODEITER: 0;
+  OpenNLASolverParameters.LUSTATS: 0;
+  OpenNLASolverParameters.MAXITER: 50;
+  OpenNLASolverParameters.MINBTFSIZE: 1;
+  OpenNLASolverParameters.MINITER: 0;
+  OpenNLASolverParameters.OBJCVG: 1.e-006;
+  OpenNLASolverParameters.PIVOTANAL: 1;
+  OpenNLASolverParameters.PIVOTSEARCH: 10;
+  OpenNLASolverParameters.PIVOTTHRESH: 0.1;
+  OpenNLASolverParameters.PIVOTZERO: 0.;
+  OpenNLASolverParameters.PRINTFREQ: -1;
+  OpenNLASolverParameters.QPCONVTOL: 1.e-010;
+  OpenNLASolverParameters.QPDEPDIAG: 2;
+  OpenNLASolverParameters.QPHESSIANUPD: 20;
+  OpenNLASolverParameters.QPITER: 10;
+  OpenNLASolverParameters.QPMICROINF: 0;
+  OpenNLASolverParameters.QPMICROMAX: 5;
+  OpenNLASolverParameters.QPMICROTOL: 1.e-012;
+  OpenNLASolverParameters.QPSTATS: 0;
+  OpenNLASolverParameters.QUICKRTN: 1;
+  OpenNLASolverParameters.RESCVG: 1.e-006;
+  OpenNLASolverParameters.RETRYFACT: 1;
+  OpenNLASolverParameters.RIGORUPDATES: 25;
+  OpenNLASolverParameters.RWORKF: 1.;
+  OpenNLASolverParameters.SAVEJDFFILE: 0;
+  OpenNLASolverParameters.SCREENFORM: 1;
+  OpenNLASolverParameters.SEARCHMODE: 1;
+  OpenNLASolverParameters.SINGULARHAND: 0;
+  OpenNLASolverParameters.TRUSTITER: 2;
+  OpenNLASolverParameters.TRUSTMODE: 0;
+  OpenNLASolverParameters.TRUSTRAMPIT: 2;
+  OpenNLASolverParameters.TRUSTSIZE: 0.1;
+  OpenNLASolverParameters.USEDROPTOL: 0;
+  OpenNLASolverParameters.VARSCALE: 1;
+  OpenNLASolverParameters.VMS_P1: 0;
+  OpenNLASolverParameters.WORKINGDIR: "C:\Users\mzamarripa\Documents\GitHub\CCSI_work\membrane_model\AM_HFGP";
   OpenOPTSolver: "";
   OpenESTSolver: "";
 End
@@ -932,5 +1001,21 @@ Estimation
   ExperimentTimeUnit: "";
 End
 Homotopy
- Enabled: FALSE;
+ Enabled: TRUE;
+ B1.phi: 0.79;
+End
+SimulationAccessExtension
+  ENABLED: false;
+End
+OnLineLinks
+  Protocol: "OPC", 1;
+  //Server: "";
+  IO: Synchronous, Cached;
+  Bounds: Clip;
+  Quality: UseLast;
+  Update: 1000;
+  PrintLevel: 2;
+  Enabled: OFF;
+  Input Events : Before SS Run, After DYN Step, After INI Step, Before INI Run;
+  Output Events: After SS Run, After DYN Step, After INI Step, After INI Run;
 End
